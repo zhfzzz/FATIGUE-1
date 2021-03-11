@@ -6,54 +6,63 @@ import os
 from pathlib import Path
 import json
 import pandas as pd
+from pandas import DataFrame
+import append2excel
+
+from scipy import interpolate
+
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
-import fatpack
+import fatpack #Download from: pip install fatpack
 import fnmatch
 
 # Import additional py-files:
 import DNV_endurance_curves as dnv
+import compoundTimeseries as annual
 
 # Prints full
 pd.options.display.max_columns = None
 # pd.reset_option('max_columns')
 
-# Finding the path to Dropboxfolder
-def resource_path():
-    try:
-        json_path = (Path(os.getenv('LOCALAPPDATA'))/'Dropbox'/'info.json').resolve()
-    except FileNotFoundError:
-        json_path = (Path(os.getenv('APPDATA'))/'Dropbox'/'info.json').resolve()
+# # Finding the path to Dropboxfolder
+# def resource_path():
+#     try:
+#         json_path = (Path(os.getenv('LOCALAPPDATA'))/'Dropbox'/'info.json').resolve()
+#     except FileNotFoundError:
+#         json_path = (Path(os.getenv('APPDATA'))/'Dropbox'/'info.json').resolve()
     
-    with open(str(json_path)) as f:
-        return json.load(f)
-db_location = resource_path()
-db_location = db_location["business"]["path"]
+#     with open(str(json_path)) as f:
+#         return json.load(f)
+# db_location = resource_path()
+# db_location = db_location["business"]["path"]
 
+db_location = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Wavefoil AS/Wavefoil AS - Dropbox Arkiv\Teknisk utvikling')
+g=-9.81 #m/s^2
+mass = 78000 #kg
 
-def fatigueDamage(foil_load, k=64, foilmodule=None):
+def fatigueLoad(foil_load, FN_interpolated, k=None, foilmodule=None, outputfolder=None, iteration=None, V=None):
     
     # Set global variables:
     global curve, category, S, fatigue_damage, path_main, y, df, li_img, li_fd
 
     # System paths
-    path_main = db_location + "\Wavefoil Team Folder\Teknisk utvikling" + "\\" + foilmodule[0:2] + ' ' + foilmodule[2:] + "\FEM ANALYSE\RAPPORT"
+    path_main = db_location +  "\\" + foilmodule[0:2] + ' ' + foilmodule[2:] + "\FEM ANALYSE\RAPPORT"
     os.chdir(path_main)
     print(path_main)
 
     df = pd.read_excel (path_main + '\\Input til FATIGUE.xlsx', sheet_name=foilmodule)
-    print (df.iloc[:, [0,1]])
+    # print (df.iloc[:, [0,1]])
  
-        # Generates overview of the loads acting on the foil:
+     # Generates overview of the loads acting on the foil:
     #%%
-    reversals, reversals_ix = fatpack.find_reversals(foil_load/1000, k)
+    reversals, reversals_ix = fatpack.find_reversals(foil_load)#, k)
     cycles, residue = fatpack.find_rainflow_cycles(reversals)
     processed_residue = fatpack.concatenate_reversals(residue, residue)
     cycles_residue, _ = fatpack.find_rainflow_cycles(processed_residue)
     cycles_total = np.concatenate((cycles, cycles_residue))
     
     # Find the rainflow ranges from the cycles
-    S = fatpack.find_rainflow_ranges(foil_load/1000, k)
+    force_range = fatpack.find_rainflow_ranges(foil_load)#, k)
     
     figsize = np.array([140., 140.]) / 10
     fig = plt.figure(dpi=180, figsize=figsize)
@@ -63,191 +72,105 @@ def fatigueDamage(foil_load, k=64, foilmodule=None):
     ax_signal = plt.subplot2grid((3, 2), (0, 0))
     ax_signal.plot(foil_load/1000)
     ax_signal.plot(reversals_ix, foil_load[reversals_ix]/1000, 'ro', fillstyle='none',
-                   label='reversal')
-    ax_signal.legend()
-    ax_signal.set(title="Signal", ylabel="Foil load [kN]", xlabel="Index", xlim=[200, 500])
+                    label='reversal')
+    # ax_signal.legend()
+    ax_signal.set(title="Signal", ylabel="Foil normal force [kN]", xlabel="Index", xlim=[0, 5000])
     
     # Plotting the cumulative distribution of the cycle count
     ax_cumdist = plt.subplot2grid((3, 2), (1, 0))
-    N, Sr = fatpack.find_range_count(S, 100)
+    N, force_distribution = fatpack.find_range_count(force_range, 25)
     Ncum = N.sum() - np.cumsum(N)
-    ax_cumdist.semilogx(Ncum, Sr)
+    ax_cumdist.semilogx(Ncum, force_distribution/1000)
     ax_cumdist.set(title="Cumulative distribution, rainflow ranges",
-                   xlabel="Count, N", ylabel="Range, Sr")
+                   xlabel="Count, N", ylabel="Foil normal force range [kN]")
     
-    # Plotting the rainflow matrix of the total cycle count
-    ax_rfcmat = plt.subplot2grid((3, 2), (1, 1), rowspan=1, aspect='equal')
-    bins = np.linspace(cycles_total.min(), cycles_total.max(), 128)
-    rfcmat = fatpack.find_rainflow_matrix(cycles_total, bins, bins)
-    X, Y = np.meshgrid(bins, bins, indexing='ij')
-    C = ax_rfcmat.pcolormesh(X, Y, rfcmat, cmap='magma')
-    fig.colorbar(C)
-    ax_rfcmat.set(title="Rainflow matrix",
-                  xlabel="Starting point", ylabel="Destination point")
-    
-    # Plotting table with info:
-    table_data = []
-    table_data.append(["Max load foils [kN]", '{:.2f}'.format(foil_load.max())])
-    table_data.append(["Number of cycles", '{:.2e}'.format(len(foil_load))])
-    
-    ax_text = plt.subplot2grid((3, 2), (0, 1), rowspan=1, aspect='equal')
-    ax_text.axis('tight')
-    ax_text.axis('off')
-    table_data = plt.table(cellText=table_data, cellLoc="left", loc="upper left")
-    table_data.scale(1, 1.2)
-    plt.title("Fatigue data:")
-    
-    fig.subplots_adjust(top=0.94)
-    plt.show()
-    
-    
-    
+    # Interpolate for a fixed range of forces
+    df_FN_interpolated = DataFrame (FN_interpolated,columns=['Foil normal force range [N]'])   
+    f = interpolate.interp1d(force_distribution, Ncum, fill_value=0, bounds_error=False)
+    Ncum_normalized = np.round(f(FN_interpolated))     
+    df_Ncum = DataFrame (Ncum_normalized,columns=['Year ' + str(iteration) + ': Number of cycles [-]'])   
+
+    # Save distribution to excel file
+    filename= outputfolder + '\FOIL FORCE STATISTICS ' + str(int(V/0.5144)) + ' knots.xlsx'
+    append2excel.append_df_to_excel(filename, df_FN_interpolated, sheet_name='Sheet1', startcol=0, startrow = 5, truncate_sheet=None, index=False)
+    append2excel.append_df_to_excel(filename, df_Ncum, sheet_name='Sheet1', startcol=iteration+4, startrow = 5,  truncate_sheet=None, index=False)
+
+    return force_range, force_distribution
+
     #%%
+def predictLifetime(force_range, foil_time, db_location, foilmodule=None):
+    """
+    Predicts lifetime for each critical hotspot in the foil module
+    Ncum =  Number of cycles during life time [-]
+    force_distribution =    Force range [N]   
+    """
+    # System paths
+    path_main = db_location +  "\\" + foilmodule[0:2] + ' ' + foilmodule[2:] + "\FEM ANALYSE\RAPPORT"
+
+    df_lifetime = pd.read_excel (path_main + '\\Input til FATIGUE.xlsx', sheet_name=foilmodule)
+    
     li_img = fnmatch.filter(os.listdir(path_main), '*hotspot*')
-    li_fd = []
+    li_fd = []           
+    table_data = []
+    table_headers = ("Curve", "Est. fl", "True fl", "Fl error")
     
-    # for i in os.listdir(path_main):
-    #     if i.endswith("hotspot*.png"):
-    #         li_pics.append(i)
+    N = np.logspace(4, 8)
     
-    for i in df.index:
-        # Find stresses acting on component in hotspor from foil load y (scale):
-        y = foil_load * df.loc[i,"stress_per_load[MPa/N]"]
+    for i in df_lifetime.index:
+        # Find stresses acting on component in hotspot from foil load y (scale):
+        stress_range = force_range * df_lifetime.loc[i,"stress_per_load[MPa/N]"]
+        print(df_lifetime.loc[i, "component"] + ': ' +df_lifetime.loc[i, "hotspot"])
+        print('   Mean stress range: ' + str(np.mean(stress_range)))
+        print('   Max stress range: ' + str(max(stress_range)))
+        print('   Max stress level: ' + str(max(stress_range)/2))
+                
+        curve = dnv.DNVGL_EnduranceCurve.in_seawater_with_cathodic_protection(df_lifetime.loc[i, "DNV_category"])
+        fatigue_damage = curve.find_miner_sum(stress_range)
+        df_lifetime.loc[i, "fatigue_damage"] = fatigue_damage
         
-        # figsize = np.array([140., 140.]) / 10
-        # fig = plt.figure(dpi=180, figsize=figsize)
-        # fig.suptitle(df.loc[i, "component"], fontsize=16)
-        
-        
-        # ax_endurance = plt.subplot2grid((3, 2), (1, 0),)
-        
-        table_data = []
-        table_headers = ("Curve", "Est. fl", "True fl", "Fl error")
-        
-        N = np.logspace(4, 8)
-        # # print("{0:<7} | {1:>8} | {2:>8} | {3:>8}".format("Curve", "Est. fl[MPa]", "True fl[MPa]", "Fl error"))
-        # for name in dnv.DNVGL_EnduranceCurve.names:
-        #     # print(name)
-        #     curve = dnv.DNVGL_EnduranceCurve.in_seawater_with_cathodic_protection(name)
-        #     data = dnv.curves_in_seawater_with_cathodic_protection[name]
-        #     fl = np.round(curve.get_stress(1e7), 2)
-        #     fl_data = data["fl"]
-        #     err = (fl-fl_data)/fl_data
-        #     np.testing.assert_almost_equal(fl, fl_data, decimal=2)
-        #     # print(f"{name:<7} | {fl:8.2f} | {fl_data:8.2f} | {err:8.2%}")
-        #     table_data.append([name, fl, fl_data, "{:.2%}".format(err)])
-        #     Sr = curve.get_stress(N)
-        #     if name == df.loc[i, "DNV_category"]:
-        #         plt.loglog(N, Sr, "k", lw=2)
-        #     else:
-        #         plt.loglog(N, Sr, "k", lw=0.5)
-        #     plt.text(2e6, curve.get_stress(2e6), "{0:2}".format(name), fontsize=5.5, 
-        #               ha='center', va='center', bbox={'fc':'w', 'ec':(0, 0, 0, 0), 'pad':1})
-        # plt.grid(which='both')
-        # plt.title("S-N curves in seawater with cathodic protection")
-        # plt.xlabel("Number of cycles")
-        # plt.ylabel("Stress range (MPa)")
-        # plt.ylim(10, 1000)
-        # plt.xlim(1e4, 1e8)
-        # fig.tight_layout()
-        
-        # # print(table_data)
-        # ax_table = plt.subplot2grid((3, 2), (1, 1), rowspan=1, aspect='equal', )
-        # ax_table.axis('tight')
-        # ax_table.axis('off')
-        # plt.title('DNV-RP-C203 endurance fatigue limit classes:')
-        # ax_table = plt.table(cellText=table_data, colLabels=table_headers, cellLoc="center", loc='upper left')
-        # ax_table.scale(1, 1.2)
-        
-        # # Plot component hotspot picture:
-        # ax_img = plt.subplot2grid((3, 2), (0, 0), rowspan=1, aspect='equal', )
-        # ax_img.axis('off')
-        # try:
-        #     img = mpimg.imread(df.loc[i, "component_no"] + "_" + df.loc[i, "hotspot"] + ".png")
-        #     plt.imshow(img)
-        # except OSError:
-        #     img = mpimg.imread("no-image.png")
-        #     plt.imshow(img)
+        #Hvor mange år er komponenten testet?
+        time_simulated = foil_time[-1]/(60*60*24*365)
+
+        #Hvor mye lenger tåler komponentet?
+        ratio = 1/fatigue_damage
+
+        #Estimated lifetime
+        lifetime = time_simulated * ratio
+        df_lifetime.loc[i, "lifetime"] = lifetime
+
+        print("   FATIGUE DAMAGE D = {:.4f} ".format(fatigue_damage) + ", estimated lifetime:  " + str(int(lifetime)) + " years\n")
             
-        # Find reversals (peaks and valleys), extract cycles and residue (open cycle
-        # sequence), process and extract closed cycles from residue. *Raw data.
-        reversals, reversals_ix = fatpack.find_reversals(y, k)
-        cycles, residue = fatpack.find_rainflow_cycles(reversals)
-        processed_residue = fatpack.concatenate_reversals(residue, residue)
-        cycles_residue, _ = fatpack.find_rainflow_cycles(processed_residue)
-        cycles_total = np.concatenate((cycles, cycles_residue))
+
+    return df_lifetime
+
+#%% Fatigue analysis 
+database = r'D:\FATIGUE\WF5910'
+n_seconds = round(60*60*24*365.2425)
+n_years = 1
+for year in range(1, int(np.ceil(n_years)+1) ):
+    #%% Create realistic time series for a period
+    import time
+    t = time.time()
+
+    if n_years < 1:
+        total_time_series, total_FN_series, total_Zacc_series, V = annual.createTimeseries(database, n_seconds*n_years)
+    else:
+        total_time_series, total_FN_series, total_Zacc_series, V = annual.createTimeseries(database, n_seconds)
         
-        # Find the rainflow ranges from the cycles
-        S = fatpack.find_rainflow_ranges(y, k)
-        
-        curve = dnv.DNVGL_EnduranceCurve.in_seawater_with_cathodic_protection(df.loc[i, "DNV_category"])
-        fatigue_damage = curve.find_miner_sum(S)
-        
-        # table_data = []
-        # table_data.append(["FATIGUE DAMAGE D", "{:.4f}".format(fatigue_damage)])
-        # table_data.append(["Max load", '{:.2f}'.format(y.max())])
-        # table_data.append(["Number of cycles", '{:.2e}'.format(len(y))])
-        
-        # ax_text = plt.subplot2grid((3, 2), (0, 1), rowspan=1, aspect='equal')
-        # # ax_text.axis('tight')
-        # ax_text.axis('off')
-        # ax_text = plt.table(cellText=table_data, cellLoc="left", loc="upper left")
-        # ax_text.scale(1, 1.2)
-        # plt.title("Fatigue data:")
-        # fig.subplots_adjust(top=0.94)
-        
-        print("FATIGUE DAMAGE D = {:.4f} ".format(fatigue_damage) + "(" + df.loc[i, "component"] + ")")
-        
-        df.loc[i, "fatigue_damage"] = fatigue_damage
-        
-        
+    foil_time = total_time_series[0::10] #dt=2s instead of 0.2s from simulations.
+    foil_load = total_FN_series[0::10] # LOAD PER FOIL  
+    a = g - total_Zacc_series[0::10] #Positive if foilmodule accelerates upwards
+    support_load = foil_load + mass*a
+
+
+    #%%Fatique loads
+    FN_interpolated = np.arange(50000, 4000000, 50000) 
+    force_range, force_distributiion = fatigueLoad(foil_load, FN_interpolated, k=32, foilmodule="WF5910", outputfolder = database, iteration = year, V=V)
     
-    # return S, fatigue_damage
-
-    # # Find reversals (peaks and valleys), extract cycles and residue (open cycle
-    # # sequence), process and extract closed cycles from residue. *Raw data.
-    # reversals, reversals_ix = fatpack.find_reversals(y, k=256)
-    # cycles, residue = fatpack.find_rainflow_cycles(reversals)
-    # processed_residue = fatpack.concatenate_reversals(residue, residue)
-    # cycles_residue, _ = fatpack.find_rainflow_cycles(processed_residue)
-    # cycles_total = np.concatenate((cycles, cycles_residue))
-    
-    # # Adding a filter to the raw data y above:
-    # ## reversals_rtf, reversals_rtf_ix = fatpack.find_reversals_racetrack_filtered(y, h=20, k=256)
-    
-    # # Find the rainflow ranges from the cycles
-    # S = fatpack.find_rainflow_ranges(y, k)
-    
+    t2 = time.time() 
+    elapsed = t2 - t
+    print('    Brukte ' + str(elapsed) + ' sekunder på år ' + str(year) + '\n\n')
 
 
-    #%%
-def readwavefoilforces(fname):
-    """
-    Reads binary result files from the wavefoil dynamic stall program in Julia
-
-    Parameters
-    ----------
-    fname : str
-        Path to the .out file located in Output/Fatigue subfolder of a given case
-    Returns
-    -------
-    time : Array of Float64
-        Array of timestamps of the simulation
-    FC : Array of Float64
-        Chordwise force on foil at given timeinstance
-    FN : Array of Float64
-        Normal force on foil at given timeinstance
-    """
-    tmp = np.fromfile(fname,dtype=float)
-    N = int(len(tmp)/3)
-    # time, FC, FN
-    return tmp[0:N], tmp[N:2*N], tmp[2*N:3*N]
-
-fname = db_location + "\Wavefoil Team Folder\Teknisk utvikling\WF 5910\FEM ANALYSE\RAPPORT\FoilForce_simtime-10800 heading-1 Tp-14 Hs-3 vel-7.out"
-
-time, FC, FN = readwavefoilforces(fname)
-
-foil_load = FN
-
-fatigueDamage(foil_load, k=500, foilmodule="WF5910")
-
+# #%% Bruker force_range fra siste år til å estimere levetider.
+df_lifetime = predictLifetime(force_range, foil_time, db_location,foilmodule="WF5910")
