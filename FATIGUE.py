@@ -20,25 +20,26 @@ import fnmatch
 import DNV_endurance_curves as dnv
 import compoundTimeseries as annual
 
+#%% INPUT
+foil_module = 'WF3970'
+database = r'D:\FATIGUE\WF3970 Ligrunn'
+route = r'C:\Users\Audun\Wavefoil AS\Wavefoil AS - Dokumenter\Hydrodynamikk\Beregninger for kunder\01 Routes\Ligrunn\Kristiansund - Faroyene -ERA5\MetOcean'
+n_years = 1
+velocity = 15  *0.5144 #m/s
+
+#%%
+
 # Prints full
 pd.options.display.max_columns = None
-# pd.reset_option('max_columns')
 
-# # Finding the path to Dropboxfolder
-# def resource_path():
-#     try:
-#         json_path = (Path(os.getenv('LOCALAPPDATA'))/'Dropbox'/'info.json').resolve()
-#     except FileNotFoundError:
-#         json_path = (Path(os.getenv('APPDATA'))/'Dropbox'/'info.json').resolve()
-    
-#     with open(str(json_path)) as f:
-#         return json.load(f)
-# db_location = resource_path()
-# db_location = db_location["business"]["path"]
+db_location = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Wavefoil AS/Wavefoil AS - Dropbox Arkiv')
 
-db_location = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Wavefoil AS/Wavefoil AS - Dropbox Arkiv\Teknisk utvikling')
+# Dimensjoning loads
+df_dimensioning = pd.read_excel(db_location + '\Beregninger\Dimensjonerende laster\Dimensjonerende laster.xlsx', index_col=0)
+mass = df_dimensioning.loc[foil_module,'Vekt'] #kg
+dim_lift = df_dimensioning.loc[foil_module,'Dimensjonerende løft'] #N
+
 g=-9.81 #m/s^2
-mass = 78000 #kg
 
 def fatigueLoad(foil_load, FN_interpolated, k=None, foilmodule=None, outputfolder=None, iteration=None, V=None):
     
@@ -46,11 +47,11 @@ def fatigueLoad(foil_load, FN_interpolated, k=None, foilmodule=None, outputfolde
     global curve, category, S, fatigue_damage, path_main, y, df, li_img, li_fd
 
     # System paths
-    path_main = db_location +  "\\" + foilmodule[0:2] + ' ' + foilmodule[2:] + "\FEM ANALYSE\RAPPORT"
-    os.chdir(path_main)
-    print(path_main)
+    # path_main = db_location +  "\Teknisk utvikling\\" + foilmodule[0:2] + ' ' + foilmodule[2:] + "\FEM ANALYSE\RAPPORT"
+    # os.chdir(path_main)
+    # print(path_main)
 
-    df = pd.read_excel (path_main + '\\Input til FATIGUE.xlsx', sheet_name=foilmodule)
+    # df = pd.read_excel(path_main + '\\Input til FATIGUE.xlsx', sheet_name=foilmodule)
     # print (df.iloc[:, [0,1]])
  
      # Generates overview of the loads acting on the foil:
@@ -93,6 +94,8 @@ def fatigueLoad(foil_load, FN_interpolated, k=None, foilmodule=None, outputfolde
     # Save distribution to excel file
     filename= outputfolder + '\FOIL FORCE STATISTICS ' + str(int(V/0.5144)) + ' knots.xlsx'
     append2excel.append_df_to_excel(filename, df_FN_interpolated, sheet_name='Sheet1', startcol=0, startrow = 5, truncate_sheet=None, index=False)
+    print(FN_interpolated)
+    print(df_FN_interpolated)
     append2excel.append_df_to_excel(filename, df_Ncum, sheet_name='Sheet1', startcol=iteration+4, startrow = 5,  truncate_sheet=None, index=False)
 
     return force_range, force_distribution
@@ -105,7 +108,7 @@ def predictLifetime(force_range, foil_time, db_location, foilmodule=None):
     force_distribution =    Force range [N]   
     """
     # System paths
-    path_main = db_location +  "\\" + foilmodule[0:2] + ' ' + foilmodule[2:] + "\FEM ANALYSE\RAPPORT"
+    path_main = db_location +  "\Teknisk utvikling\\" + foilmodule[0:2] + ' ' + foilmodule[2:] + "\FEM ANALYSE\RAPPORT"
 
     df_lifetime = pd.read_excel (path_main + '\\Input til FATIGUE.xlsx', sheet_name=foilmodule)
     
@@ -144,19 +147,21 @@ def predictLifetime(force_range, foil_time, db_location, foilmodule=None):
     return df_lifetime
 
 #%% Fatigue analysis 
-database = r'D:\FATIGUE\WF5910'
+
 n_seconds = round(60*60*24*365.2425)
-n_years = 1
+
 for year in range(1, int(np.ceil(n_years)+1) ):
     #%% Create realistic time series for a period
     import time
     t = time.time()
 
     if n_years < 1:
-        total_time_series, total_FN_series, total_Zacc_series, V = annual.createTimeseries(database, n_seconds*n_years)
+        total_time_series, total_FN_series, total_Zacc_series = annual.createTimeseries(database, route, n_seconds*n_years, velocity)
     else:
-        total_time_series, total_FN_series, total_Zacc_series, V = annual.createTimeseries(database, n_seconds)
-        
+        total_time_series, total_FN_series, total_Zacc_series = annual.createTimeseries(database, route, n_seconds, velocity)
+     
+    dt = total_time_series[1]-total_time_series[0]
+    print('dt =' + str(dt) )
     foil_time = total_time_series[0::10] #dt=2s instead of 0.2s from simulations.
     foil_load = total_FN_series[0::10] # LOAD PER FOIL  
     a = g - total_Zacc_series[0::10] #Positive if foilmodule accelerates upwards
@@ -164,8 +169,8 @@ for year in range(1, int(np.ceil(n_years)+1) ):
 
 
     #%%Fatique loads
-    FN_interpolated = np.arange(50000, 4000000, 50000) 
-    force_range, force_distributiion = fatigueLoad(foil_load, FN_interpolated, k=32, foilmodule="WF5910", outputfolder = database, iteration = year, V=V)
+    FN_interpolated = np.arange(0.01*dim_lift, 2*dim_lift, dim_lift/20 )
+    force_range, force_distributiion = fatigueLoad(foil_load, FN_interpolated, k=32, foilmodule=foil_module, outputfolder = database, iteration = year, V=velocity)
     
     t2 = time.time() 
     elapsed = t2 - t
@@ -173,4 +178,4 @@ for year in range(1, int(np.ceil(n_years)+1) ):
 
 
 # #%% Bruker force_range fra siste år til å estimere levetider.
-df_lifetime = predictLifetime(force_range, foil_time, db_location,foilmodule="WF5910")
+df_lifetime = predictLifetime(force_range, foil_time, db_location,foilmodule=foil_module)
