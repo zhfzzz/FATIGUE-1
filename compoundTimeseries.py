@@ -19,33 +19,36 @@ import pandas as pd
 import readwavefoilforcesexample
 import numpy as np
 import random
+
+heading_strings = ['0.0 - 22.5 deg', '22.5 - 67.5 deg','67.5 - 112.5 deg','112.5 - 157.5 deg','157.5 - 180.0 deg',]
             
-def createTimeseries(database, total_seconds_in_period):
+def createTimeseries(database, route, total_seconds_in_period, velocity):
     total_FN_series = []
     total_Zacc_series = []
     
-    heading_index=0
-    V_index=0
-    print("heading_index = " + str(heading_index))
-    print("V_index = " + str(V_index))
-    
+
     #%% Load simulation variables
-    headings = pd.read_csv(database + '\FoilForce_variables-headings.csv' ,header=None)[0].to_numpy()
+    # headings = pd.read_csv(database + '\FoilForce_variables-headings.csv' ,header=None)[0].to_numpy()
     periods = pd.read_csv(database + '\FoilForce_variables-Tp.csv' ,header=None)[0].to_numpy()
     heights = pd.read_csv(database + '\FoilForce_variables-Hs.csv' ,header=None)[0].to_numpy()
     velocities = pd.read_csv(database + '\FoilForce_variables-velocities.csv' ,header=None)[0].to_numpy()
+
+    
+    V_index = list(np.round(velocities)).index(round(velocity))
     print('V=' + str(velocities[V_index])      )
+    print("V_index = " + str(V_index))
+    
                   
     #%% Find total number of observations
     observations = 0
     progression = 0
-    for heading_index in range(len(headings)):             
-        temp = pd.read_csv(database + '\\HsTpScatter - relative wave direction ' + str(heading_index+1) + '.csv',index_col=0)
+    for heading_index in range(len(heading_strings)):             
+        temp = pd.read_csv(route + '\\HsTpScatter - relative wave direction ' + heading_strings[heading_index] + '.csv',index_col=0)
         observations = observations + temp.sum().sum()
 
     #Go though all simulations and compose a representative time series
-    for heading_index in range(len(headings)):   
-        wave_stat = pd.read_csv(database + '\\HsTpScatter - relative wave direction ' + str(heading_index+1) + '.csv',index_col=0)
+    for heading_index in range(len(heading_strings)):   
+        wave_stat = pd.read_csv(route + '\\HsTpScatter - relative wave direction ' + heading_strings[heading_index] + '.csv',index_col=0)
         print('heading_index = ' + str(heading_index))
         for Hs_index in range(len(heights)): # Python indexing
             print('    Hs_index = ' + str(Hs_index))
@@ -56,7 +59,7 @@ def createTimeseries(database, total_seconds_in_period):
                     try:
                         # Import 3 hour time series
                         fname = database + '\PortFoilForce_simtime-10800 heading-' + str(heading_index+1) + ' Tp-' + str(Tp_index+1) + ' Hs-' + str(Hs_index+1) +' vel-' + str(V_index+1) +'.out'
-                        time, FC, FN, Zacc = readwavefoilforcesexample.readwavefoilforces(fname)
+                        time, FC, FN, FX, FZ, Zacc = readwavefoilforcesexample.readwavefoilforces(fname)
     
                         probability = wave_stat.iloc[Hs_index,Tp_index] / observations
                     except:
@@ -100,8 +103,7 @@ def createTimeseries(database, total_seconds_in_period):
         total_FN_series =   np.concatenate( (total_FN_series,   np.zeros(ni)) )
         total_Zacc_series = np.concatenate( (total_Zacc_series, np.zeros(ni)) )
     
-    return total_time_series, total_FN_series, total_Zacc_series, velocities[V_index]
-                                                       
+    return total_time_series, total_FN_series, total_Zacc_series
 #%% Additional 
 
                                              
