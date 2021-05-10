@@ -76,3 +76,20 @@ def append_df_to_excel(filename, df, sheet_name='Sheet1', startcol=None,    trun
     # write out the new sheet
     df.to_excel(writer, sheet_name, startcol=startcol, **to_excel_kwargs)
     writer.save()
+    
+import xlsxwriter
+from openpyxl import load_workbook
+from xlsxwriter.utility import xl_rowcol_to_cell
+
+def append_to_cell(filename, variable, col=None,  row=None,  truncate_sheet=False,    **to_excel_kwargs):
+    
+    # Start by opening the spreadsheet and selecting the main sheet
+    workbook = load_workbook(filename)
+    sheet = workbook.active
+
+    cell = xl_rowcol_to_cell(row, col)  
+    print(cell)
+    sheet[cell] = str(variable)
+    # sheet.write(row, col, 'ISBT DEHRADUN')
+    # Save the spreadsheet
+    workbook.save(filename)
