@@ -34,9 +34,13 @@ def createTimeseries(database, route, total_seconds_in_period, velocity):
     velocities = pd.read_csv(database + '\FoilForce_variables-velocities.csv' ,header=None)[0].to_numpy()
 
     
-    V_index = list(np.round(velocities)).index(round(velocity))
+    # V_index = list(np.round(velocities)).index(round(velocity))
+    V_index = list(velocities).index(velocity)
     print('V=' + str(velocities[V_index])      )
     print("V_index = " + str(V_index))
+    
+    if velocities[V_index]!=velocity:
+        raise Exception('Hastigheten er feil, sjekk "velocity" i FATIGUE.py')
     
                   
     #%% Find total number of observations
@@ -54,17 +58,20 @@ def createTimeseries(database, route, total_seconds_in_period, velocity):
             print('    Hs_index = ' + str(Hs_index))
             for Tp_index in range(len(periods)): # Python indexing
                 print('        Tp_index = ' + str(Tp_index))
-                        
+                  
                 if (heights[Hs_index]/periods[Tp_index] <= 0.75):
                     try:
                         # Import 3 hour time series
                         fname = database + '\PortFoilForce_simtime-10800 heading-' + str(heading_index+1) + ' Tp-' + str(Tp_index+1) + ' Hs-' + str(Hs_index+1) +' vel-' + str(V_index+1) +'.out'
-                        time, FC, FN, FX, FZ, Zacc = readwavefoilforcesexample.readwavefoilforces(fname)
+
+                        time, FC, FN, FX, FZ, Zacc, AoA, alphaE, alphaf = readwavefoilforcesexample.readwavefoilforces(fname)
+
     
                         probability = wave_stat.iloc[Hs_index,Tp_index] / observations
                     except:
                         print('        (File does not exist)')
                         probability = 0   
+                        time=[1]
                         
                 
                 else:
@@ -75,6 +82,7 @@ def createTimeseries(database, route, total_seconds_in_period, velocity):
                 seconds_in_period = probability * total_seconds_in_period 
                 
                 number_of_3_hour_time_series = seconds_in_period / time[-1] #In period
+
         
                 n = int(number_of_3_hour_time_series * len(time) ) #Number of time steps to be added to total time series
         

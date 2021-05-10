@@ -22,10 +22,10 @@ import compoundTimeseries as annual
 
 #%% INPUT
 foil_module = 'WF3970'
-database = r'D:\FATIGUE\WF3970 Ligrunn'
+database = r'C:\Users\audun\Wavefoil AS\Wavefoil AS - Routesimulations\Salt Ship Design\0332 Ligrunn\WF3970 - Fatigue\Output\Fatigue'
 route = r'C:\Users\Audun\Wavefoil AS\Wavefoil AS - Dokumenter\Hydrodynamikk\Beregninger for kunder\01 Routes\Ligrunn\Kristiansund - Faroyene -ERA5\MetOcean'
-n_years = 1
-velocity = 15  *0.5144 #m/s
+n_years = 1.5
+velocity = 8.48833 #m/s
 
 #%%
 
@@ -41,7 +41,7 @@ dim_lift = df_dimensioning.loc[foil_module,'Dimensjonerende løft'] #N
 
 g=-9.81 #m/s^2
 
-def fatigueLoad(foil_load, FN_interpolated, k=None, foilmodule=None, outputfolder=None, iteration=None, V=None):
+def fatigueLoad(foil_load, FN_interpolated, k=None, foilmodule=None, outputfolder=None, n_years=None, V=None):
     
     # Set global variables:
     global curve, category, S, fatigue_damage, path_main, y, df, li_img, li_fd
@@ -89,14 +89,14 @@ def fatigueLoad(foil_load, FN_interpolated, k=None, foilmodule=None, outputfolde
     df_FN_interpolated = DataFrame (FN_interpolated,columns=['Foil normal force range [N]'])   
     f = interpolate.interp1d(force_distribution, Ncum, fill_value=0, bounds_error=False)
     Ncum_normalized = np.round(f(FN_interpolated))     
-    df_Ncum = DataFrame (Ncum_normalized,columns=['Year ' + str(iteration) + ': Number of cycles [-]'])   
+    df_Ncum = DataFrame (Ncum_normalized,columns=['Number of cycles simulated [-]'])   
 
     # Save distribution to excel file
     filename= outputfolder + '\FOIL FORCE STATISTICS ' + str(int(V/0.5144)) + ' knots.xlsx'
-    append2excel.append_df_to_excel(filename, df_FN_interpolated, sheet_name='Sheet1', startcol=0, startrow = 5, truncate_sheet=None, index=False)
-    print(FN_interpolated)
-    print(df_FN_interpolated)
-    append2excel.append_df_to_excel(filename, df_Ncum, sheet_name='Sheet1', startcol=iteration+4, startrow = 5,  truncate_sheet=None, index=False)
+    append2excel.append_df_to_excel(filename, df_FN_interpolated, sheet_name='Sheet1', startcol=1, startrow = 5, truncate_sheet=None, index=False)
+
+    append2excel.append_df_to_excel(filename, df_Ncum, sheet_name='Sheet1', startcol=0, startrow = 5,  truncate_sheet=None, index=False)
+    append2excel.append_to_cell(filename, n_years, col=1, row = 0,  truncate_sheet=None, index=False)
 
     return force_range, force_distribution
 
@@ -150,31 +150,31 @@ def predictLifetime(force_range, foil_time, db_location, foilmodule=None):
 
 n_seconds = round(60*60*24*365.2425)
 
-for year in range(1, int(np.ceil(n_years)+1) ):
-    #%% Create realistic time series for a period
-    import time
-    t = time.time()
+# for year in range(1, int(np.ceil(n_years)+1) ):
+#%% Create realistic time series for a period
+import time
+t = time.time()
 
-    if n_years < 1:
-        total_time_series, total_FN_series, total_Zacc_series = annual.createTimeseries(database, route, n_seconds*n_years, velocity)
-    else:
-        total_time_series, total_FN_series, total_Zacc_series = annual.createTimeseries(database, route, n_seconds, velocity)
-     
-    dt = total_time_series[1]-total_time_series[0]
-    print('dt =' + str(dt) )
-    foil_time = total_time_series[0::10] #dt=2s instead of 0.2s from simulations.
-    foil_load = total_FN_series[0::10] # LOAD PER FOIL  
-    a = g - total_Zacc_series[0::10] #Positive if foilmodule accelerates upwards
-    support_load = foil_load + mass*a
+if n_years < 1:
+    total_time_series, total_FN_series, total_Zacc_series = annual.createTimeseries(database, route, n_seconds*n_years, velocity)
+else:
+    total_time_series, total_FN_series, total_Zacc_series = annual.createTimeseries(database, route, n_seconds, velocity)
+ 
+dt = total_time_series[1]-total_time_series[0]
+print('dt =' + str(dt) )
+foil_time = total_time_series[0::10] #dt=2s instead of 0.2s from simulations.
+foil_load = total_FN_series[0::10] # LOAD PER FOIL  
+a = g - total_Zacc_series[0::10] #Positive if foilmodule accelerates upwards
+support_load = foil_load + mass*a
 
 
-    #%%Fatique loads
-    FN_interpolated = np.arange(0.01*dim_lift, 2*dim_lift, dim_lift/20 )
-    force_range, force_distributiion = fatigueLoad(foil_load, FN_interpolated, k=32, foilmodule=foil_module, outputfolder = database, iteration = year, V=velocity)
-    
-    t2 = time.time() 
-    elapsed = t2 - t
-    print('    Brukte ' + str(elapsed) + ' sekunder på år ' + str(year) + '\n\n')
+#%%Fatique loads
+FN_interpolated = np.arange(0.01*dim_lift, 3*dim_lift, dim_lift/30 )
+force_range, force_distributiion = fatigueLoad(foil_load, FN_interpolated, k=32, foilmodule=foil_module, outputfolder = database, n_years=n_years, V=velocity)
+
+t2 = time.time() 
+elapsed = t2 - t
+print('    Brukte ' + str(elapsed) + ' sekunder\n\n')
 
 
 # #%% Bruker force_range fra siste år til å estimere levetider.
